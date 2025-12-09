@@ -65,12 +65,18 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
       const safeRef = reference ? reference.replace(/[^a-zA-Z0-9]/g, '-') : 'بدون_رقم';
       const filename = `${safeSupplier}_${safeRef}.pdf`;
 
+      // Optimized for capture
       const opt = {
-        margin: 0.2,
+        margin: 0.1,
         filename: filename,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'in', format: 'a6', orientation: 'portrait' } // A6 size ideal for receipts
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true,
+          scrollY: 0, // Critical to prevent capturing blank space if page is scrolled
+          windowWidth: 800 // Ensure valid window width context
+        },
+        jsPDF: { unit: 'in', format: 'a6', orientation: 'portrait' } 
       };
 
       // Dynamic import for html2pdf
@@ -508,9 +514,19 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
           </form>
         </div>
 
-        {/* Hidden Receipt Template for Screenshot */}
-        <div id="transaction-receipt" style={{ position: 'fixed', left: '-9999px', top: 0, width: '80mm', backgroundColor: 'white' }}>
-          <div className="p-4 border border-black text-black font-mono text-sm">
+        {/* Hidden Receipt Template for Screenshot - Fixed Positioning Strategy */}
+        <div id="transaction-receipt" style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            width: '80mm', 
+            backgroundColor: '#ffffff', 
+            zIndex: -9999, // Behind everything
+            color: '#000000',
+            padding: '5mm',
+            boxSizing: 'border-box'
+        }}>
+          <div className="border border-black text-black font-mono text-sm p-4">
              <div className="text-center border-b border-black pb-2 mb-2">
                <h3 className="font-bold text-lg">إيصال عملية</h3>
                <p className="text-xs">{new Date().toLocaleString('ar-EG')}</p>
