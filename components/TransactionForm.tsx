@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Supplier, TransactionType, User as UserType } from '../types';
-import { Calendar, FileText, DollarSign, User, FileWarning, Wallet, Hash, ChevronDown, ChevronUp, Plus, Minus, ArrowRightLeft, Lock, KeyRound } from 'lucide-react';
+import { Calendar, FileText, DollarSign, User, FileWarning, Wallet, Hash, ChevronDown, ChevronUp, Plus, Minus, ArrowRightLeft, Lock, KeyRound, Monitor } from 'lucide-react';
 
 interface Props {
   suppliers: Supplier[];
@@ -54,43 +54,63 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
     setShowAuthModal(true);
   };
 
-  const generateReceiptSnapshot = async (supplierName: string, userName: string) => {
+  const captureFullDesktop = async (supplierName: string) => {
     setIsGeneratingReceipt(true);
     try {
-      const element = document.getElementById('transaction-receipt');
-      if (!element) return;
+      // 1. Request Screen Selection from User
+      // The browser will ask: "Choose what to share". The user must select "Entire Screen".
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { 
+          // @ts-ignore
+          cursor: "always" 
+        },
+        audio: false
+      });
 
-      // Clean filename
+      // 2. Create a video element to play the stream temporarily
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      
+      // Wait for the video to load data
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          video.play();
+          resolve(true);
+        };
+      });
+
+      // Brief delay to ensure frame is rendered
+      await new Promise(r => setTimeout(r, 500));
+
+      // 3. Draw the video frame to a canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
+      // 4. Stop the stream (stop sharing)
+      stream.getTracks().forEach(track => track.stop());
+
+      // 5. Generate Filename
       const safeSupplier = supplierName.replace(/\s+/g, '_');
       const safeRef = reference ? reference.replace(/[^a-zA-Z0-9]/g, '-') : 'بدون_رقم';
-      const filename = `${safeSupplier}_${safeRef}.pdf`;
+      const timestamp = new Date().getTime().toString().slice(-4);
+      const filename = `${safeSupplier}_${safeRef}_${timestamp}.png`;
 
-      // Optimized for capture
-      const opt = {
-        margin: 0.1,
-        filename: filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
-          scale: 2, 
-          useCORS: true,
-          scrollY: 0, // Critical to prevent capturing blank space if page is scrolled
-          windowWidth: 800 // Ensure valid window width context
-        },
-        jsPDF: { unit: 'in', format: 'a6', orientation: 'portrait' } 
-      };
+      // 6. Download Image
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png', 1.0);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-      // Dynamic import for html2pdf
-      // @ts-ignore
-      const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = html2pdfModule.default;
-      
-      await html2pdf().set(opt).from(element).save();
-      
-      // Small delay to ensure download starts
-      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (err) {
-      console.error("Error generating receipt", err);
-      // Don't stop the submission flow if PDF fails, just log it
+      console.error("Screen capture cancelled or failed", err);
+      // We don't block the save if they cancel the screenshot
     } finally {
       setIsGeneratingReceipt(false);
     }
@@ -116,22 +136,18 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
       reference_number: reference,
       notes,
       original_invoice_number: originalInvoiceRef,
-      created_by: foundUser.name // Attach User Name
+      created_by: foundUser.name
     };
 
-    // Prepare payload
     const payload: any = { ...baseData };
 
-    // If it's an invoice, check for extra sections
     if (type === 'invoice') {
-      // Handle Payment
       if (paidAmount && parseFloat(paidAmount) > 0) {
         payload.hasPayment = true;
         payload.paymentAmount = parseFloat(paidAmount);
         payload.paymentReference = paymentRef;
       }
       
-      // Handle Return
       if (isReturnExpanded && returnAmount && parseFloat(returnAmount) > 0) {
         payload.hasReturn = true;
         payload.returnAmount = parseFloat(returnAmount);
@@ -141,26 +157,30 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
       }
     }
 
-    // 3. Generate Snapshot BEFORE closing modal or submitting
     const currentSupplier = suppliers.find(s => s.id.toString() === supplierId);
+    
+    // --- CRITICAL CHANGE FOR UX ---
+    // Hide the modal FIRST so the screenshot sees the app, not the password popup
+    setShowAuthModal(false);
+    
+    // Wait a tiny bit for the modal to disappear visually from the DOM
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // 3. Trigger Full Desktop Capture
     if (currentSupplier) {
-      await generateReceiptSnapshot(currentSupplier.name, foundUser.name);
+      await captureFullDesktop(currentSupplier.name);
     }
 
-    setShowAuthModal(false); // Close modal
+    // 4. Submit Data to Database
     await onSubmit(payload);
 
-    // Reset basics
+    // Reset Form
     setAmount('');
     setReference('');
     setNotes('');
     setOriginalInvoiceRef('');
-    
-    // Reset Payment
     setPaidAmount('');
     setPaymentRef('');
-
-    // Reset Return
     setIsReturnExpanded(false);
     setReturnAmount('');
     setReturnReceiptRef('');
@@ -206,12 +226,9 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
 
   const theme = getTheme();
 
-  // Helper to get supplier name for the hidden receipt
-  const selectedSupplierName = suppliers.find(s => s.id.toString() === supplierId)?.name || '';
-
   return (
     <>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden relative">
+      <div id="active-transaction-form" className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden relative">
         <div className="border-b border-slate-100 p-4 bg-slate-50 flex items-center justify-between">
           <h2 className="font-bold text-lg text-slate-800">تسجيل عملية جديدة</h2>
         </div>
@@ -514,63 +531,7 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
           </form>
         </div>
 
-        {/* Hidden Receipt Template for Screenshot - Fixed Positioning Strategy */}
-        <div id="transaction-receipt" style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            width: '80mm', 
-            backgroundColor: '#ffffff', 
-            zIndex: -9999, // Behind everything
-            color: '#000000',
-            padding: '5mm',
-            boxSizing: 'border-box'
-        }}>
-          <div className="border border-black text-black font-mono text-sm p-4">
-             <div className="text-center border-b border-black pb-2 mb-2">
-               <h3 className="font-bold text-lg">إيصال عملية</h3>
-               <p className="text-xs">{new Date().toLocaleString('ar-EG')}</p>
-             </div>
-             
-             <div className="space-y-2 mb-4">
-                <div className="flex justify-between">
-                  <span>المورد:</span>
-                  <span className="font-bold">{selectedSupplierName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>نوع العملية:</span>
-                  <span className="font-bold">{type === 'invoice' ? 'فاتورة مشتريات' : type === 'payment' ? 'سداد' : 'مرتجع'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>رقم المستند:</span>
-                  <span className="font-bold">{reference || '-'}</span>
-                </div>
-                 <div className="flex justify-between">
-                  <span>التاريخ:</span>
-                  <span className="font-bold">{date}</span>
-                </div>
-             </div>
-
-             <div className="border-t border-b border-black py-2 my-2 text-center">
-                <p className="text-xs mb-1">المبلغ الإجمالي</p>
-                <p className="text-xl font-bold">{parseFloat(amount || '0').toLocaleString()} ج.م</p>
-             </div>
-
-             {notes && (
-               <div className="mb-2 text-xs">
-                 <span className="font-bold">ملاحظات:</span>
-                 <p>{notes}</p>
-               </div>
-             )}
-
-             <div className="mt-4 pt-2 border-t border-dashed border-black text-center text-xs">
-               <p>تم التسجيل بواسطة: {users.find(u => u.code === authCode)?.name || 'مسؤول النظام'}</p>
-               <p className="mt-1">نظام إدارة الموردين</p>
-             </div>
-          </div>
-        </div>
-
-        {/* Auth Modal Overlay */}
+        {/* Auth Modal Overlay - Outside of captured area */}
         {showAuthModal && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in p-4">
              <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm border-2 border-primary-500">
@@ -580,6 +541,10 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">تأكيد هوية المستخدم</h3>
                   <p className="text-slate-500 text-sm mt-1">يرجى إدخال الكود الخاص بك لإتمام العملية</p>
+                  <p className="text-slate-400 text-xs mt-3 bg-slate-50 p-2 rounded border border-slate-100">
+                    <Monitor className="w-3 h-3 inline-block mr-1 align-middle" />
+                    ملاحظة: سيطلب المتصفح منك تحديد الشاشة لالتقاط صورة كاملة. اختر <b>"Entire Screen"</b>.
+                  </p>
                 </div>
 
                 <form onSubmit={handleAuthSubmit}>
@@ -604,7 +569,7 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
                       disabled={isGeneratingReceipt}
                       className="flex-1 bg-primary-600 text-white py-2 rounded-lg font-bold hover:bg-primary-700 transition-colors disabled:opacity-70"
                     >
-                      {isGeneratingReceipt ? 'جاري الطباعة...' : 'تأكيد وحفظ'}
+                      {isGeneratingReceipt ? 'جاري التحضير...' : 'تأكيد وحفظ'}
                     </button>
                     <button
                       type="button"
