@@ -23,6 +23,7 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authCode, setAuthCode] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
 
   // Update type if initialType changes
   useEffect(() => {
@@ -51,6 +52,42 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
     setAuthCode('');
     setAuthError('');
     setShowAuthModal(true);
+  };
+
+  const generateReceiptSnapshot = async (supplierName: string, userName: string) => {
+    setIsGeneratingReceipt(true);
+    try {
+      const element = document.getElementById('transaction-receipt');
+      if (!element) return;
+
+      // Clean filename
+      const safeSupplier = supplierName.replace(/\s+/g, '_');
+      const safeRef = reference ? reference.replace(/[^a-zA-Z0-9]/g, '-') : 'بدون_رقم';
+      const filename = `${safeSupplier}_${safeRef}.pdf`;
+
+      const opt = {
+        margin: 0.2,
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a6', orientation: 'portrait' } // A6 size ideal for receipts
+      };
+
+      // Dynamic import for html2pdf
+      // @ts-ignore
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdf = html2pdfModule.default;
+      
+      await html2pdf().set(opt).from(element).save();
+      
+      // Small delay to ensure download starts
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (err) {
+      console.error("Error generating receipt", err);
+      // Don't stop the submission flow if PDF fails, just log it
+    } finally {
+      setIsGeneratingReceipt(false);
+    }
   };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -96,6 +133,12 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
         payload.returnOriginalRef = returnOriginalRef;
         payload.returnNote = returnNote;
       }
+    }
+
+    // 3. Generate Snapshot BEFORE closing modal or submitting
+    const currentSupplier = suppliers.find(s => s.id.toString() === supplierId);
+    if (currentSupplier) {
+      await generateReceiptSnapshot(currentSupplier.name, foundUser.name);
     }
 
     setShowAuthModal(false); // Close modal
@@ -156,6 +199,9 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
   };
 
   const theme = getTheme();
+
+  // Helper to get supplier name for the hidden receipt
+  const selectedSupplierName = suppliers.find(s => s.id.toString() === supplierId)?.name || '';
 
   return (
     <>
@@ -462,6 +508,52 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
           </form>
         </div>
 
+        {/* Hidden Receipt Template for Screenshot */}
+        <div id="transaction-receipt" style={{ position: 'fixed', left: '-9999px', top: 0, width: '80mm', backgroundColor: 'white' }}>
+          <div className="p-4 border border-black text-black font-mono text-sm">
+             <div className="text-center border-b border-black pb-2 mb-2">
+               <h3 className="font-bold text-lg">إيصال عملية</h3>
+               <p className="text-xs">{new Date().toLocaleString('ar-EG')}</p>
+             </div>
+             
+             <div className="space-y-2 mb-4">
+                <div className="flex justify-between">
+                  <span>المورد:</span>
+                  <span className="font-bold">{selectedSupplierName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>نوع العملية:</span>
+                  <span className="font-bold">{type === 'invoice' ? 'فاتورة مشتريات' : type === 'payment' ? 'سداد' : 'مرتجع'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>رقم المستند:</span>
+                  <span className="font-bold">{reference || '-'}</span>
+                </div>
+                 <div className="flex justify-between">
+                  <span>التاريخ:</span>
+                  <span className="font-bold">{date}</span>
+                </div>
+             </div>
+
+             <div className="border-t border-b border-black py-2 my-2 text-center">
+                <p className="text-xs mb-1">المبلغ الإجمالي</p>
+                <p className="text-xl font-bold">{parseFloat(amount || '0').toLocaleString()} ج.م</p>
+             </div>
+
+             {notes && (
+               <div className="mb-2 text-xs">
+                 <span className="font-bold">ملاحظات:</span>
+                 <p>{notes}</p>
+               </div>
+             )}
+
+             <div className="mt-4 pt-2 border-t border-dashed border-black text-center text-xs">
+               <p>تم التسجيل بواسطة: {users.find(u => u.code === authCode)?.name || 'مسؤول النظام'}</p>
+               <p className="mt-1">نظام إدارة الموردين</p>
+             </div>
+          </div>
+        </div>
+
         {/* Auth Modal Overlay */}
         {showAuthModal && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in p-4">
@@ -493,9 +585,10 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
                   <div className="flex gap-3">
                     <button
                       type="submit"
-                      className="flex-1 bg-primary-600 text-white py-2 rounded-lg font-bold hover:bg-primary-700 transition-colors"
+                      disabled={isGeneratingReceipt}
+                      className="flex-1 bg-primary-600 text-white py-2 rounded-lg font-bold hover:bg-primary-700 transition-colors disabled:opacity-70"
                     >
-                      تأكيد وحفظ
+                      {isGeneratingReceipt ? 'جاري الطباعة...' : 'تأكيد وحفظ'}
                     </button>
                     <button
                       type="button"
