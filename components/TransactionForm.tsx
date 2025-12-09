@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Supplier, TransactionType, User as UserType } from '../types';
 import { Calendar, FileText, DollarSign, User, FileWarning, Wallet, Hash, ChevronDown, ChevronUp, Plus, Minus, ArrowRightLeft, Lock, KeyRound, Monitor } from 'lucide-react';
@@ -58,12 +57,11 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
     setIsGeneratingReceipt(true);
     try {
       // 1. Request Screen Selection from User
-      // The browser will ask: "Choose what to share". The user must select "Entire Screen".
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { 
-          // @ts-ignore
+          displaySurface: "monitor", // Hint to browser to prioritize full screen
           cursor: "always" 
-        },
+        } as any,
         audio: false
       });
 
@@ -79,8 +77,8 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
         };
       });
 
-      // Brief delay to ensure frame is rendered
-      await new Promise(r => setTimeout(r, 500));
+      // Wait a bit to ensure the frame is populated (especially for external apps)
+      await new Promise(r => setTimeout(r, 800));
 
       // 3. Draw the video frame to a canvas
       const canvas = document.createElement('canvas');
@@ -110,7 +108,6 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
 
     } catch (err) {
       console.error("Screen capture cancelled or failed", err);
-      // We don't block the save if they cancel the screenshot
     } finally {
       setIsGeneratingReceipt(false);
     }
@@ -159,12 +156,11 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
 
     const currentSupplier = suppliers.find(s => s.id.toString() === supplierId);
     
-    // --- CRITICAL CHANGE FOR UX ---
-    // Hide the modal FIRST so the screenshot sees the app, not the password popup
+    // Hide modal
     setShowAuthModal(false);
     
-    // Wait a tiny bit for the modal to disappear visually from the DOM
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Wait for modal transition to finish completely (increased delay)
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // 3. Trigger Full Desktop Capture
     if (currentSupplier) {
@@ -541,9 +537,9 @@ const TransactionForm: React.FC<Props> = ({ suppliers, users, onSubmit, isLoadin
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">تأكيد هوية المستخدم</h3>
                   <p className="text-slate-500 text-sm mt-1">يرجى إدخال الكود الخاص بك لإتمام العملية</p>
-                  <p className="text-slate-400 text-xs mt-3 bg-slate-50 p-2 rounded border border-slate-100">
+                  <p className="text-slate-500 text-xs mt-3 bg-blue-50 p-2 rounded border border-blue-100 font-medium">
                     <Monitor className="w-3 h-3 inline-block mr-1 align-middle" />
-                    ملاحظة: سيطلب المتصفح منك تحديد الشاشة لالتقاط صورة كاملة. اختر <b>"Entire Screen"</b>.
+                    هام: لتصوير البرامج الأخرى، اختر تبويب <b>"Entire Screen"</b> أو <b>"الشاشة بالكامل"</b> من النافذة التي ستظهر.
                   </p>
                 </div>
 
